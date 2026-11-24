@@ -38,6 +38,7 @@ padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-are
 .sheet[hidden]{display:none}
 .panel{width:100%;max-width:340px;background:var(--bg);border:2px solid var(--ink);border-radius:16px;padding:18px;display:grid;gap:10px}
 .panel h2{margin:0 0 2px;font-size:1.05rem;font-weight:700;letter-spacing:.02em}
+.panel .result{margin:0;font-weight:600;color:var(--green)}
 .panel button{font:inherit;font-weight:600;color:var(--ink);background:none;border:2px solid var(--ink);border-radius:12px;padding:12px;cursor:pointer}
 .panel button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
 .panel .row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
@@ -75,6 +76,7 @@ padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-are
 <div class="sheet" id="sheet" hidden>
   <div class="panel" role="dialog" aria-label="Menu">
     <h2>Pathfinder</h2>
+    <p class="result" id="result" hidden></p>
     <div class="row" id="levels">
       <button data-l="easy" aria-pressed="true">Easy</button>
       <button data-l="medium" aria-pressed="false">Medium</button>
@@ -119,8 +121,8 @@ function gen(){
     else wallW[ny][nx]=false;
     seen[at(nx,ny)]=true;stack.push(at(nx,ny));
   }
-  start=at(Math.random()*n|0,0);
-  goal=at(Math.random()*n|0,n-1);
+  start=at(0,0);
+  goal=at(n-1,n-1);
   sol=bfs(start,goal);
   if(!sol.length)throw new Error('generated maze has no route from start to goal');
 }
@@ -165,7 +167,11 @@ function check(){
   if(pos!==goal)return;
   won=true;
   beep(660,.09,.5);setTimeout(()=>beep(990,.16,.5),110);
-  toast.textContent='Solved in '+steps+(steps===1?' step':' steps');
+  const msg='Solved in '+steps+(steps===1?' step':' steps');
+  say(msg);
+  const r=$('result');
+  r.textContent=msg;r.hidden=false;
+  setMenu(true);
 }
 
 let actx=null;
@@ -219,9 +225,11 @@ function render(){
 
 function say(t){toast.textContent=t}
 
-function newPuzzle(){gen();pos=start;steps=0;won=false;showSol=false;say('');syncSol();render()}
+function clearResult(){say('');const r=$('result');r.hidden=true;r.textContent=''}
 
-function startOver(){pos=start;steps=0;won=false;say('');render()}
+function newPuzzle(){gen();pos=start;steps=0;won=false;showSol=false;clearResult();syncSol();render()}
+
+function startOver(){pos=start;steps=0;won=false;clearResult();render()}
 
 function syncSol(){const b=$('showSol');b.setAttribute('aria-pressed',showSol?'true':'false');b.textContent=showSol?'Hide solution':'Show solution'}
 
@@ -229,7 +237,6 @@ function setMenu(open){
   menuOpen=open;
   sheet.hidden=!open;
   $('menu').setAttribute('aria-expanded',open?'true':'false');
-  if(open)say('');
 }
 
 function setLevel(lv){
