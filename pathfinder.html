@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#016563">
+<title>Pathfinder</title>
+<style>
+:root{--bg:#016563;--ink:#fff;--green:#00cc00;--red:#f00}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px);
+-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;overflow:hidden}
+.app{display:flex;flex-direction:column;height:100%;max-width:560px;margin:0 auto;padding:6px 16px 10px}
+.bar{display:flex;align-items:center;justify-content:space-between;height:52px;flex:none}
+.icon{background:none;border:0;color:var(--ink);padding:10px;margin:-10px;cursor:pointer;border-radius:10px;display:grid;place-items:center}
+.icon:focus-visible{outline:3px solid var(--ink);outline-offset:3px}
+.burger{display:block;width:34px}
+.burger i{display:block;height:5px;border-radius:3px;background:currentColor;margin:6px 0}
+.burger i:last-child{margin-bottom:0}
+#stage{flex:1;display:grid;place-items:center;min-height:0;position:relative}
+#maze{display:block;touch-action:none}
+#toast{position:absolute;left:0;right:0;bottom:2px;text-align:center;font-weight:600;min-height:1.3em;pointer-events:none}
+.pad{display:grid;grid-template-columns:repeat(3,62px);grid-template-rows:repeat(3,62px);justify-content:center;flex:none;padding-top:8px}
+.pad button{background:none;border:0;padding:0;cursor:pointer;display:grid;place-items:center;border-radius:10px}
+.pad button::before{content:"";width:44px;height:44px;background:var(--ink);clip-path:polygon(50% 0,100% 100%,0 100%)}
+.pad [data-dir="up"]{grid-area:1/2}
+.pad [data-dir="left"]{grid-area:2/1}
+.pad [data-dir="right"]{grid-area:2/3}
+.pad [data-dir="down"]{grid-area:3/2}
+.pad [data-dir="left"]::before{transform:rotate(-90deg)}
+.pad [data-dir="right"]::before{transform:rotate(90deg)}
+.pad [data-dir="down"]::before{transform:rotate(180deg)}
+.pad button:active::before{opacity:.55}
+.pad button:focus-visible{outline:3px solid var(--ink);outline-offset:0}
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:start center;padding:72px 20px;z-index:10}
+.sheet[hidden]{display:none}
+.panel{width:100%;max-width:340px;background:var(--bg);border:2px solid var(--ink);border-radius:16px;padding:18px;display:grid;gap:10px}
+.panel h2{margin:0 0 2px;font-size:1.05rem;font-weight:700;letter-spacing:.02em}
+.panel button{font:inherit;font-weight:600;color:var(--ink);background:none;border:2px solid var(--ink);border-radius:12px;padding:12px;cursor:pointer}
+.panel button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.panel .row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.panel .row button{padding:10px 0;font-size:.9rem}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="bar">
+    <button class="icon" id="menu" aria-label="Menu" aria-expanded="false" aria-controls="sheet">
+      <span class="burger" aria-hidden="true"><i></i><i></i><i></i></span>
+    </button>
+    <button class="icon" id="sound" aria-label="Sound on" aria-pressed="true">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor" stroke="none"></path>
+        <path id="wave1" d="M15.5 8.5a5 5 0 0 1 0 7"></path>
+        <path id="wave2" d="M18.5 6a9 9 0 0 1 0 12"></path>
+      </svg>
+    </button>
+  </header>
+
+  <main id="stage">
+    <canvas id="maze" role="img" aria-label="Maze"></canvas>
+    <div id="toast" aria-live="polite"></div>
+  </main>
+
+  <nav class="pad" id="pad" aria-label="Move">
+    <button data-dir="up" aria-label="Move up"></button>
+    <button data-dir="left" aria-label="Move left"></button>
+    <button data-dir="right" aria-label="Move right"></button>
+    <button data-dir="down" aria-label="Move down"></button>
+  </nav>
+</div>
+
+<div class="sheet" id="sheet" hidden>
+  <div class="panel" role="dialog" aria-label="Menu">
+    <h2>Pathfinder</h2>
+    <div class="row" id="levels">
+      <button data-l="easy" aria-pressed="true">Easy</button>
+      <button data-l="medium" aria-pressed="false">Medium</button>
+      <button data-l="hard" aria-pressed="false">Difficult</button>
+    </div>
+    <button id="newPuzzle">New puzzle</button>
+    <button id="startOver">Start over</button>
+    <button id="showSol" aria-pressed="false">Show solution</button>
+    <button id="sheetClose">Close</button>
+  </div>
+</div>
+
+<script>
+const BG='#016563',INK='#fff',GREEN='#00cc00',RED='#ff0000';
+const LEVELS={easy:11,medium:15,hard:21};
+const DIRS={up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]};
+
+let level='easy',n=LEVELS.easy,wallN=[],wallW=[],start=0,goal=0,pos=0,steps=0,won=false,sol=[],showSol=false,sound=true,menuOpen=false;
+
+const $=id=>document.getElementById(id);
+const canvas=$('maze'),stage=$('stage'),ctx=canvas.getContext('2d'),toast=$('toast'),sheet=$('sheet'),pad=$('pad'),levels=$('levels');
+
+const cx=i=>i%n,cy=i=>i/n|0,at=(x,y)=>y*n+x;
+
+function gen(){
+  n=LEVELS[level];
+  wallN=Array.from({length:n},()=>Array(n).fill(true));
+  wallW=Array.from({length:n},()=>Array(n).fill(true));
+  const seen=Array(n*n).fill(false),stack=[0];
+  seen[0]=true;
+  while(stack.length){
+    const c=stack[stack.length-1],x=cx(c),y=cy(c);
+    const options=[[0,-1],[1,0],[0,1],[-1,0]].filter(([dx,dy])=>{
+      const nx=x+dx,ny=y+dy;
+      return nx>=0&&ny>=0&&nx<n&&ny<n&&!seen[at(nx,ny)];
+    });
+    if(!options.length){stack.pop();continue}
+    const [dx,dy]=options[Math.random()*options.length|0],nx=x+dx,ny=y+dy;
+    if(dy===-1)wallN[y][x]=false;
+    else if(dy===1)wallN[ny][nx]=false;
+    else if(dx===-1)wallW[y][x]=false;
+    else wallW[ny][nx]=false;
+    seen[at(nx,ny)]=true;stack.push(at(nx,ny));
+  }
+  start=at(Math.random()*n|0,0);
+  goal=at(Math.random()*n|0,n-1);
+  sol=bfs(start,goal);
+  if(!sol.length)throw new Error('generated maze has no route from start to goal');
+}
+
+function neighbours(c){
+  const x=cx(c),y=cy(c),out=[];
+  if(y>0&&!wallN[y][x])out.push(at(x,y-1));
+  if(y<n-1&&!wallN[y+1][x])out.push(at(x,y+1));
+  if(x>0&&!wallW[y][x])out.push(at(x-1,y));
+  if(x<n-1&&!wallW[y][x+1])out.push(at(x+1,y));
+  return out;
+}
+
+function bfs(a,b){
+  const prev=new Map([[a,-1]]),q=[a];
+  while(q.length){const c=q.shift();if(c===b)break;for(const j of neighbours(c))if(!prev.has(j)){prev.set(j,c);q.push(j)}}
+  if(!prev.has(b))return [];
+  const p=[];for(let c=b;c!==-1;c=prev.get(c))p.push(c);return p.reverse();
+}
+
+function target(dir){
+  const [dx,dy]=DIRS[dir],x=cx(pos),y=cy(pos),nx=x+dx,ny=y+dy;
+  if(nx<0||ny<0||nx>=n||ny>=n)return null;
+  if(dy===-1&&wallN[y][x])return null;
+  if(dy===1&&wallN[ny][nx])return null;
+  if(dx===-1&&wallW[y][x])return null;
+  if(dx===1&&wallW[ny][nx])return null;
+  return at(nx,ny);
+}
+
+function move(dir){
+  if(won||menuOpen)return false;
+  const to=target(dir);
+  if(to==null)return false;
+  pos=to;steps++;
+  beep(240,.045,.5);
+  render();check();
+  return true;
+}
+
+function check(){
+  if(pos!==goal)return;
+  won=true;
+  beep(660,.09,.5);setTimeout(()=>beep(990,.16,.5),110);
+  toast.textContent='Solved in '+steps+(steps===1?' step':' steps');
+}
+
+let actx=null;
+function beep(freq,dur,vol){
+  if(!sound||!window.AudioContext)return;
+  try{
+    actx=actx||new window.AudioContext();
+    const o=actx.createOscillator(),g=actx.createGain();
+    o.type='sine';o.frequency.value=freq;g.gain.value=vol*.12;
+    o.connect(g);g.connect(actx.destination);
+    const t=actx.currentTime;
+    g.gain.setValueAtTime(g.gain.value,t);
+    g.gain.exponentialRampToValueAtTime(.0001,t+dur);
+    o.start(t);o.stop(t+dur);
+  }catch(e){}
+}
+
+function render(){
+  const dpr=Math.min(window.devicePixelRatio||1,2);
+  let size=Math.min(stage.clientWidth||0,stage.clientHeight||0);
+  if(!size)size=Math.min(window.innerWidth||360,(window.innerHeight||640)-320);
+  canvas.style.width=size+'px';canvas.style.height=size+'px';
+  canvas.width=Math.round(size*dpr);canvas.height=Math.round(size*dpr);
+  if(!ctx)return;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,size,size);
+  const s=size/n,lw=Math.max(2,s*.075),half=lw/2;
+  ctx.lineCap='square';ctx.lineWidth=lw;ctx.strokeStyle=INK;
+  ctx.strokeRect(half,half,size-lw,size-lw);
+  ctx.beginPath();
+  for(let y=0;y<n;y++)for(let x=0;x<n;x++){
+    if(y>0&&wallN[y][x]){ctx.moveTo(x*s,y*s);ctx.lineTo((x+1)*s,y*s)}
+    if(x>0&&wallW[y][x]){ctx.moveTo(x*s,y*s);ctx.lineTo(x*s,(y+1)*s)}
+  }
+  ctx.stroke();
+  if(showSol&&sol.length>1){
+    ctx.save();ctx.globalAlpha=.5;ctx.lineWidth=Math.max(3,s*.15);ctx.lineJoin='round';ctx.lineCap='round';
+    ctx.beginPath();
+    sol.forEach((c,i)=>{const px=(cx(c)+.5)*s,py=(cy(c)+.5)*s;i?ctx.lineTo(px,py):ctx.moveTo(px,py)});
+    ctx.stroke();ctx.restore();
+  }
+  const barW=Math.max(5,s*.16);
+  ctx.lineCap='butt';ctx.lineWidth=barW;
+  ctx.strokeStyle=GREEN;
+  ctx.beginPath();ctx.moveTo(cx(start)*s,half);ctx.lineTo((cx(start)+1)*s,half);ctx.stroke();
+  ctx.strokeStyle=RED;
+  ctx.beginPath();ctx.moveTo(cx(goal)*s,size-half);ctx.lineTo((cx(goal)+1)*s,size-half);ctx.stroke();
+  ctx.fillStyle=INK;
+  ctx.beginPath();ctx.arc((cx(pos)+.5)*s,(cy(pos)+.5)*s,s*.34,0,Math.PI*2);ctx.fill();
+}
+
+function say(t){toast.textContent=t}
+
+function newPuzzle(){gen();pos=start;steps=0;won=false;showSol=false;say('');syncSol();render()}
+
+function startOver(){pos=start;steps=0;won=false;say('');render()}
+
+function syncSol(){const b=$('showSol');b.setAttribute('aria-pressed',showSol?'true':'false');b.textContent=showSol?'Hide solution':'Show solution'}
+
+function setMenu(open){
+  menuOpen=open;
+  sheet.hidden=!open;
+  $('menu').setAttribute('aria-expanded',open?'true':'false');
+  if(open)say('');
+}
+
+function setLevel(lv){
+  level=lv;
+  [...levels.children].forEach(b=>b.setAttribute('aria-pressed',b.dataset.l===lv?'true':'false'));
+  newPuzzle();
+}
+
+$('menu').addEventListener('click',()=>setMenu(!menuOpen));
+$('sheetClose').addEventListener('click',()=>setMenu(false));
+$('newPuzzle').addEventListener('click',()=>{setMenu(false);newPuzzle()});
+$('startOver').addEventListener('click',()=>{setMenu(false);startOver()});
+$('showSol').addEventListener('click',()=>{showSol=!showSol;syncSol();render()});
+levels.addEventListener('click',e=>{
+  const b=e.target&&e.target.closest?e.target.closest('button'):null;
+  if(!b)return;
+  setLevel(b.dataset.l);
+});
+
+$('sound').addEventListener('click',()=>{
+  sound=!sound;
+  const b=$('sound');
+  b.setAttribute('aria-pressed',sound?'true':'false');
+  b.setAttribute('aria-label',sound?'Sound on':'Sound off');
+  $('wave1').setAttribute('opacity',sound?'1':'0');
+  $('wave2').setAttribute('opacity',sound?'1':'0');
+  if(sound)beep(520,.06,.5);
+});
+
+pad.addEventListener('click',e=>{
+  const b=e.target&&e.target.closest?e.target.closest('button'):null;
+  if(!b)return;
+  move(b.dataset.dir);
+});
+
+window.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&menuOpen){setMenu(false);return}
+  const dir={ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right'}[e.key];
+  if(dir&&move(dir))e.preventDefault();
+});
+
+let touch=null;
+canvas.addEventListener('pointerdown',e=>{touch={x:e.clientX,y:e.clientY}});
+canvas.addEventListener('pointerup',e=>{
+  if(!touch)return;
+  const dx=e.clientX-touch.x,dy=e.clientY-touch.y;
+  touch=null;
+  if(Math.abs(dx)<24&&Math.abs(dy)<24)return;
+  move(Math.abs(dx)>Math.abs(dy)?(dx>0?'right':'left'):(dy>0?'down':'up'));
+});
+
+window.addEventListener('resize',render);
+
+setMenu(false);
+newPuzzle();
+</script>
+</body>
+</html>
